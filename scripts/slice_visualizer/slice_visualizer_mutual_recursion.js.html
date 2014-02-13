@@ -1,0 +1,766 @@
+<meta charset="UTF-8">
+<html>
+<head>
+    <title>notJS Slice Visualizer</title>
+    <style type="text/css">
+    body { 
+        background-color:#dc8;
+        font-size:14px;
+        font-family: monospace;
+        margin:0;
+        padding:0; 
+    }
+
+    #code {
+        background-color:#ffd; 
+        width:100%;
+        height:65%;
+        overflow:auto;
+        padding:30px;
+        float: left;
+    }
+
+    circle {
+      stroke-width: 1.5px;
+    }
+     
+    line {
+      stroke: #999;
+    }
+ 
+    #controls { 
+        width:100%;
+        background-color:#333; 
+        color:#fff;
+        height:10%;
+        text-align:center;
+        vertical-align:middle;
+        display: table;
+    }
+
+    #controls #content {
+        display: table-cell;
+        vertical-align: middle;
+    }
+
+    #bottom {
+        clear:both;
+        background-color:#dc8;
+        height:10%;
+        padding:30px;
+        overflow:auto;
+    }
+
+    div {
+        resize: both;
+    }
+
+    div.color_0 {
+        background-color: #eec;
+    }
+
+    .notInSlice {
+        /*opacity: 0.3*/
+        color: #aaa
+    }
+
+    .seed {
+        font-weight: bold
+    }
+
+    #controls {
+        font-size: 20px;
+    }
+
+    .bigbutton {
+        font-size: 30px;
+    }
+    </style>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.3/jquery.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/jquery-ui.min.js"></script>
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+    <link rel="stylesheet" href="css/jquery.colorpicker.css" />
+    <link rel="stylesheet" href="css/jquery.classygradient.css" />
+    <script src="js/jquery.colorpicker.js"></script>
+    <script src="js/jquery.classygradient.js"></script>
+    <script type="text/javascript">
+        var lastLinesHTML = null
+        var lineIDs = []
+
+        var edges = []
+        var forwardNeighbors = {}
+        var backwardNeighbors = {}
+
+        var edgeColors = {'data': '#FF0000', 'control': '#EEEE00', 'declaration': '#00FFFF', 'other': '#00CC00'}
+
+        function refresh() {
+            initEdges()
+            initLines()
+            clearSlice()
+        }
+
+        function initEdges() {
+            console.log($('#bottom').text())
+            edges = JSON.parse($('#bottom').text())
+            for (var i=0; i<edges.length; i++) {
+                var source = edges[i].source
+                var target = edges[i].target
+                var color = edgeColors[edges[i].type]
+                if (color === undefined)
+                    color = edgeColors['other']
+
+                if (forwardNeighbors[source] === undefined)
+                    forwardNeighbors[source] = {}
+                if (forwardNeighbors[source][target] === undefined)
+                    forwardNeighbors[source][target] = []
+                forwardNeighbors[source][target].push(color)
+
+                if (backwardNeighbors[target] === undefined)
+                    backwardNeighbors[target] = {}
+                if (backwardNeighbors[target][source] === undefined)
+                    backwardNeighbors[target][source] = []
+                backwardNeighbors[target][source].push(color)
+
+            }
+        }
+
+        function initLines() {
+            var lines = $('#code').html()
+
+            if (lines.indexOf('<button') > -1)
+                return
+
+            if (lines === lastLinesHTML)
+                return
+
+            lineIDs = []
+
+            lines = lines.replace(/<div[^>]*>/g, '')
+            lines = lines.replace(/ /g, '&nbsp;')
+            lines = lines.replace(/<\/div>/g, '\n')
+            lines = lines.replace(/<br>/g, '\n')
+            lines = lines.split('\n')
+
+            var text = []
+            var nMatches = 0
+            for (var i=0; i<lines.length; i++) {
+                var match = /ID:&nbsp;([0-9]+)/.exec(lines[i])
+                
+                if (match) {
+                    nMatches++
+                    var codeLine = lines[i].replace(/ID:&nbsp;([0-9]+)/, '')
+                    var idButton = "<button onclick='javascript:doSlice(\"" + match[1] + "\")'>Slice from " + match[1] + "</button>"
+                    var divClass = "color_" + (nMatches % 2)
+                    text += "<div class='line_" + match[1] + " " + divClass + "'>" + codeLine + idButton  + "</div>"
+                    lineIDs.push(match[1])
+                } else {
+                    text += "<div>" + lines[i] + "</div>"
+                }
+            }
+            $('#code').html(text)
+            lastLinesHTML = text
+        }
+
+        function doSlice(seed) {
+            clearSlice()
+
+            var isForward = $('#forward').attr('checked')
+            var neighbors = isForward ? forwardNeighbors : backwardNeighbors
+            var direction = isForward ? 'target' : 'source'
+
+            $('.line_' + seed).addClass('seed')
+
+            // Highlight neighbors
+            for (var neighbor in neighbors[seed]) {
+                var edgeColors = neighbors[seed][neighbor]
+                edgeColors.sort()
+
+                var gradientSpec = ''
+                for (var i=0; i<edgeColors.length; i++) {
+                    gradientSpec += (100*i)/edgeColors.length + '%' + edgeColors[i]
+                    gradientSpec += ','
+                    gradientSpec += (100*(i+1))/edgeColors.length + '%' + edgeColors[i]
+                    if (i < edgeColors.length - 1) {
+                        gradientSpec += ','
+                    }
+                }
+
+                var hiddenDiv = $('<div id="hidden" style="display: none">').appendTo('body')
+                hiddenDiv.ClassyGradient({
+                    target: ".line_" + neighbor,
+                    orientation: "horizontal",
+                    gradient: gradientSpec}); 
+            }
+
+            // Hide lines that aren't in the slice
+            for (var i=0; i<lineIDs.length; i++) {
+                $('.line_' + lineIDs[i]).addClass('notInSlice')
+            }
+
+            var visited = {seed: true}
+            var stack = [seed]
+            while (stack.length > 0) {
+                var current = stack.pop()
+                $('.line_' + current).removeClass('notInSlice')
+                for (var next in neighbors[current]) {
+                    if (visited[next] === undefined) {
+                        stack.push(next)
+                        visited[next] = true
+                    }
+                }
+            }
+        }
+
+        function clearSlice() {
+            for (var i=0; i<lineIDs.length; i++) {
+                $('.line_' + lineIDs[i]).attr('style', '')
+                $('.line_' + lineIDs[i]).removeClass('notInSlice')
+                $('.line_' + lineIDs[i]).removeClass('seed')
+            }
+        }
+
+        // function watchForChanges(id) {
+        //     $(id).live('focus', function() {
+        //       before = $(this).html();
+        //     }).live('blur keyup paste', function() { 
+        //       if (before != $(this).html()) {
+        //         refresh()
+        //       }
+        //     });
+        // }
+        // watchForChanges('#bottom')
+
+        $(document).ready(function () {
+            $('#code').html($('#codePlaceholder').html())
+            $('#bottom').html($('#bottomPlaceholder').html())
+            refresh()
+        })
+
+        function instructions() {
+            alert("1) Paste the output from codeprint.txt in the top box.\n"
+             + "2) Paste the edge descriptions (from SlicingAlgorithms.formatDependenceEdges) in the bottom box.\n"
+             + "3) Press 'Load'.\n"
+             + "4) Choose a slice direction and click a 'Slice from ...' button to slice. "
+             + "Directly dependent statements will be highlighted, and statements not in the slice will be greyed out.")
+        }
+    </script>
+</head>
+
+<body>
+<div>
+    <div id="code" contenteditable="true" spellcheck="false">code</div>
+</div>
+<br/>
+<div id="controls">
+    <div id="content">
+        <button onclick="javascript:instructions()" class="bigbutton">Instructions</button>
+        <button onclick="javascript:refresh()" class="bigbutton">Load</button>
+        Slice direction:
+        <input type="radio" name="direction" id="forward" value="Forward" /><label for="forward">Forward</label>
+        <input type="radio" name="direction" id="backward" value="Backward" checked /><label for="backward">Backward</label>
+    </div>
+</div>
+<div id="bottom" contenteditable="true" spellcheck="false">
+Paste dependence graph here
+</div>
+
+<!-- ************************************************ -->
+<!-- Dummy elements to hold the long placeholder text -->
+<!-- ************************************************ -->
+<text style="display: none" id="codePlaceholder">
+decl `dummy`2 = undef, `arrayVar`3 = `window`0 ⌜⋆⌝ "Array", `functionVar`4 = `window`0 ⌜⋆⌝ "Function", `stringVar`5 = `window`0 ⌜⋆⌝ "String", `regexpVar`6 = `window`0 ⌜⋆⌝ "RegExp", `booleanVar`7 = `window`0 ⌜⋆⌝ "Boolean", `numberVar`8 = `window`0 ⌜⋆⌝ "Number", `dateVar`9 = `window`0 ⌜⋆⌝ "Date", `errorVar`10 = `window`0 ⌜⋆⌝ "Error", `argumentsVar`11 = `window`0 ⌜⋆⌝ "Arguments", `objectVar`12 = `window`0 ⌜⋆⌝ "Object", `dummyAddressVar`13 = `window`0 ⌜⋆⌝ "dummyAddress", window = `window`0 inID: 62000 
+  scratch (6) in                                                                                    ID: 61990 
+      (`window`0).("dummyAddress") = undef                                                          ID: 56590 
+      (`window`0).("Arguments") = undef                                                             ID: 56630 
+      (`window`0).("g") = undef                                                                     ID: 56670 
+      (`window`0).("f") = undef                                                                     ID: 56710 
+      scratch_0 = newfun (1.0)                                                                      ID: 58340 
+        (`self`14, arguments) =>                                                                    ID: 58320 
+          decl x = arguments ⌜⋆⌝ "0" in                                                             ID: 58310 
+            scratch (4) in                                                                          ID: 58300 
+              :RETURN::                                                                             ID: 58290 
+                  merge                                                                             ID: 56790 
+                  if typeof x ⌜≡⌝ "string" ⌜&&⌝ false                                               ID: 57270 
+                      scratch_0 = x ⌜≺⌝ 0.0                                                         ID: 56900 
+                  else                                                                              ID: 57270 
+                      if isprim x                                                                   ID: 57190 
+                          scratch_1 = tonum x                                                       ID: 56970 
+                      else                                                                          ID: 57190 
+                          scratch_2 = new `argumentsVar`11(`dummyAddressVar`13)                     ID: 57020 
+                          merge                                                                     ID: 57030 
+                          (scratch_2).("0") = x                                                     ID: 57070 
+                          (scratch_2).("length") = 1.0                                              ID: 57110 
+                          scratch_1 = `numberVar`8(`window`0, scratch_2)                            ID: 57160 
+                          merge                                                                     ID: 57170 
+                      merge                                                                         ID: 57200 
+                      scratch_0 = scratch_1 ⌜<⌝ 0.0                                                 ID: 57250 
+                  merge                                                                             ID: 57280 
+                  if tobool scratch_0                                                               ID: 57380 
+                      jmp :RETURN: "f"                                                              ID: 57320 
+                  else                                                                              ID: 57380 
+                      `dummy`2 = undef                                                              ID: 57360 
+                  merge                                                                             ID: 57390 
+                  scratch_0 = toObj `window`0 ⌜⋆⌝ "arr"                                             ID: 57440 
+                  if isprim x                                                                       ID: 57700 
+                      scratch_1 = tostr x                                                           ID: 57500 
+                  else                                                                              ID: 57700 
+                      scratch_2 = new `argumentsVar`11(`dummyAddressVar`13)                         ID: 57550 
+                      merge                                                                         ID: 57560 
+                      (scratch_2).("length") = 0.0                                                  ID: 57600 
+                      scratch_1 = x ⌜⋆⌝ "toString"(x, scratch_2)                                    ID: 57670 
+                      merge                                                                         ID: 57680 
+                  merge                                                                             ID: 57710 
+                  (scratch_0).(scratch_1) = x                                                       ID: 57750 
+                  if isprim x                                                                       ID: 58030 
+                      scratch_0 = tonum x                                                           ID: 57810 
+                  else                                                                              ID: 58030 
+                      scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                         ID: 57860 
+                      merge                                                                         ID: 57870 
+                      (scratch_1).("0") = x                                                         ID: 57910 
+                      (scratch_1).("length") = 1.0                                                  ID: 57950 
+                      scratch_0 = `numberVar`8(`window`0, scratch_1)                                ID: 58000 
+                      merge                                                                         ID: 58010 
+                  merge                                                                             ID: 58040 
+                  scratch_2 = new `argumentsVar`11(`dummyAddressVar`13)                             ID: 58080 
+                  merge                                                                             ID: 58090 
+                  (scratch_2).("0") = scratch_0 ⌜−⌝ 1.0                                             ID: 58150 
+                  (scratch_2).("length") = 1.0                                                      ID: 58190 
+                  scratch_3 = `window`0 ⌜⋆⌝ "g"(`window`0, scratch_2)                               ID: 58260 
+                  merge                                                                             ID: 58270 
+      scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                                         ID: 58380 
+      merge                                                                                         ID: 58390 
+      (scratch_1).("length") = 0.0                                                                  ID: 58430 
+      scratch_2 = new `objectVar`12(scratch_1)                                                      ID: 58470 
+      merge                                                                                         ID: 58480 
+      (scratch_0).("prototype") = scratch_2                                                         ID: 58520 
+      (`window`0).("f") = scratch_0                                                                 ID: 58560 
+      scratch_3 = newfun (1.0)                                                                      ID: 61060 
+        (`self`14, arguments) =>                                                                    ID: 61040 
+          decl y = arguments ⌜⋆⌝ "0" in                                                             ID: 61030 
+            scratch (9) in                                                                          ID: 61020 
+              :RETURN::                                                                             ID: 61010 
+                  merge                                                                             ID: 58640 
+                  if typeof y ⌜≡⌝ "string" ⌜&&⌝ false                                               ID: 59120 
+                      scratch_0 = y ⌜≺⌝ 0.0                                                         ID: 58750 
+                  else                                                                              ID: 59120 
+                      if isprim y                                                                   ID: 59040 
+                          scratch_1 = tonum y                                                       ID: 58820 
+                      else                                                                          ID: 59040 
+                          scratch_2 = new `argumentsVar`11(`dummyAddressVar`13)                     ID: 58870 
+                          merge                                                                     ID: 58880 
+                          (scratch_2).("0") = y                                                     ID: 58920 
+                          (scratch_2).("length") = 1.0                                              ID: 58960 
+                          scratch_1 = `numberVar`8(`window`0, scratch_2)                            ID: 59010 
+                          merge                                                                     ID: 59020 
+                      merge                                                                         ID: 59050 
+                      scratch_0 = scratch_1 ⌜<⌝ 0.0                                                 ID: 59100 
+                  merge                                                                             ID: 59130 
+                  if tobool scratch_0                                                               ID: 59230 
+                      jmp :RETURN: "g"                                                              ID: 59170 
+                  else                                                                              ID: 59230 
+                      `dummy`2 = undef                                                              ID: 59210 
+                  merge                                                                             ID: 59240 
+                  if isprim y                                                                       ID: 59530 
+                      scratch_0 = y                                                                 ID: 59290 
+                  else                                                                              ID: 59530 
+                      scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                         ID: 59340 
+                      merge                                                                         ID: 59350 
+                      (scratch_1).("0") = true                                                      ID: 59390 
+                      (scratch_1).("length") = 1.0                                                  ID: 59430 
+                      scratch_0 = y ⌜⋆⌝ "valueOf"(y, scratch_1)                                     ID: 59500 
+                      merge                                                                         ID: 59510 
+                  merge                                                                             ID: 59540 
+                  if isprim scratch_0                                                               ID: 59790 
+                      scratch_2 = scratch_0                                                         ID: 59590 
+                  else                                                                              ID: 59790 
+                      scratch_3 = new `argumentsVar`11(`dummyAddressVar`13)                         ID: 59640 
+                      merge                                                                         ID: 59650 
+                      (scratch_3).("length") = 0.0                                                  ID: 59690 
+                      scratch_2 = scratch_0 ⌜⋆⌝ "toString"(scratch_0, scratch_3)                    ID: 59760 
+                      merge                                                                         ID: 59770 
+                  merge                                                                             ID: 59800 
+                  if isprim scratch_2                                                               ID: 59900 
+                      scratch_4 = scratch_2                                                         ID: 59850 
+                  else                                                                              ID: 59900 
+                      throw "TypeError"                                                             ID: 59880 
+                  merge                                                                             ID: 59910 
+                  if typeof scratch_4 ⌜≡⌝ "string"                                                  ID: 60100 
+                      scratch_5 = scratch_4 ⌜++⌝ tostr 1.0                                          ID: 60010 
+                  else                                                                              ID: 60100 
+                      scratch_5 = tonum scratch_4 ⌜+⌝ 1.0                                           ID: 60080 
+                  merge                                                                             ID: 60110 
+                  scratch_6 = toObj `window`0 ⌜⋆⌝ "arr"                                             ID: 60160 
+                  if isprim y                                                                       ID: 60420 
+                      scratch_7 = tostr y                                                           ID: 60220 
+                  else                                                                              ID: 60420 
+                      scratch_8 = new `argumentsVar`11(`dummyAddressVar`13)                         ID: 60270 
+                      merge                                                                         ID: 60280 
+                      (scratch_8).("length") = 0.0                                                  ID: 60320 
+                      scratch_7 = y ⌜⋆⌝ "toString"(y, scratch_8)                                    ID: 60390 
+                      merge                                                                         ID: 60400 
+                  merge                                                                             ID: 60430 
+                  (scratch_6).(scratch_7) = scratch_5                                               ID: 60470 
+                  if isprim y                                                                       ID: 60750 
+                      scratch_0 = tonum y                                                           ID: 60530 
+                  else                                                                              ID: 60750 
+                      scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                         ID: 60580 
+                      merge                                                                         ID: 60590 
+                      (scratch_1).("0") = y                                                         ID: 60630 
+                      (scratch_1).("length") = 1.0                                                  ID: 60670 
+                      scratch_0 = `numberVar`8(`window`0, scratch_1)                                ID: 60720 
+                      merge                                                                         ID: 60730 
+                  merge                                                                             ID: 60760 
+                  scratch_2 = new `argumentsVar`11(`dummyAddressVar`13)                             ID: 60800 
+                  merge                                                                             ID: 60810 
+                  (scratch_2).("0") = scratch_0 ⌜−⌝ 1.0                                             ID: 60870 
+                  (scratch_2).("length") = 1.0                                                      ID: 60910 
+                  scratch_3 = `window`0 ⌜⋆⌝ "f"(`window`0, scratch_2)                               ID: 60980 
+                  merge                                                                             ID: 60990 
+      scratch_4 = new `argumentsVar`11(`dummyAddressVar`13)                                         ID: 61100 
+      merge                                                                                         ID: 61110 
+      (scratch_4).("length") = 0.0                                                                  ID: 61150 
+      scratch_5 = new `objectVar`12(scratch_4)                                                      ID: 61190 
+      merge                                                                                         ID: 61200 
+      (scratch_3).("prototype") = scratch_5                                                         ID: 61240 
+      (`window`0).("g") = scratch_3                                                                 ID: 61280 
+      scratch_0 = new `argumentsVar`11(`dummyAddressVar`13)                                         ID: 61320 
+      merge                                                                                         ID: 61330 
+      (scratch_0).("length") = 0.0                                                                  ID: 61370 
+      scratch_1 = new `arrayVar`3(scratch_0)                                                        ID: 61410 
+      merge                                                                                         ID: 61420 
+      (scratch_1).("length") = 0.0                                                                  ID: 61460 
+      (`window`0).("arr") = scratch_1                                                               ID: 61500 
+      scratch_0 = new `argumentsVar`11(`dummyAddressVar`13)                                         ID: 61540 
+      merge                                                                                         ID: 61550 
+      (scratch_0).("0") = 50.0                                                                      ID: 61590 
+      (scratch_0).("length") = 1.0                                                                  ID: 61630 
+      scratch_1 = `window`0 ⌜⋆⌝ "f"(`window`0, scratch_0)                                           ID: 61700 
+      merge                                                                                         ID: 61710 
+      print scratch_1                                                                               ID: 61730 
+      scratch_0 = toObj `window`0 ⌜⋆⌝ "arr"                                                         ID: 61780 
+      scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                                         ID: 61820 
+      merge                                                                                         ID: 61830 
+      (scratch_1).("length") = 0.0                                                                  ID: 61870 
+      scratch_2 = scratch_0 ⌜⋆⌝ "toString"(scratch_0, scratch_1)                                    ID: 61940 
+      merge                                                                                         ID: 61950 
+      print scratch_2                                                                               ID: 61970 
+
+</text>
+<text style="display: none" id="bottomPlaceholder">
+<pre>[
+{"source": 61990, "target": 61320, "type": "declaration"},
+{"source": 61700, "target": 61780, "type": "control"},
+{"source": 57320, "target": 58260, "type": "control"},
+{"source": 59230, "target": 59850, "type": "control"},
+{"source": 61700, "target": 61820, "type": "control"},
+{"source": 60980, "target": 57200, "type": "control"},
+{"source": 57320, "target": 57810, "type": "control"},
+{"source": 61700, "target": 58300, "type": "control"},
+{"source": 59170, "target": 59540, "type": "control"},
+{"source": 61060, "target": 61030, "type": "declaration"},
+{"source": 58260, "target": 58830, "type": "control"},
+{"source": 58310, "target": 57750, "type": "declaration"},
+{"source": 57320, "target": 58150, "type": "control"},
+{"source": 60980, "target": 57380, "type": "control"},
+{"source": 59170, "target": 59910, "type": "control"},
+{"source": 61540, "target": 61630, "type": "data"},
+{"source": 60100, "target": 60470, "type": "control"},
+{"source": 62000, "target": 58080, "type": "declaration"},
+{"source": 59590, "target": 59900, "type": "data"},
+{"source": 61410, "target": 61730, "type": "data"},
+{"source": 61700, "target": 61730, "type": "control"},
+{"source": 59170, "target": 59850, "type": "control"},
+{"source": 61700, "target": 56970, "type": "control"},
+{"source": 61700, "target": 57280, "type": "control"},
+{"source": 61990, "target": 61240, "type": "declaration"},
+{"source": 60530, "target": 61700, "type": "data"},
+{"source": 58560, "target": 61700, "type": "data"},
+{"source": 58340, "target": 58310, "type": "declaration"},
+{"source": 60980, "target": 58290, "type": "control"},
+{"source": 60870, "target": 58310, "type": "data"},
+{"source": 57380, "target": 58080, "type": "control"},
+{"source": 60980, "target": 57260, "type": "control"},
+{"source": 61990, "target": 58560, "type": "declaration"},
+{"source": 57320, "target": 57390, "type": "control"},
+{"source": 60800, "target": 60980, "type": "data"},
+{"source": 60100, "target": 60870, "type": "control"},
+{"source": 59850, "target": 60080, "type": "data"},
+{"source": 59230, "target": 59240, "type": "control"},
+{"source": 61410, "target": 61940, "type": "data"},
+{"source": 58080, "target": 58260, "type": "data"},
+{"source": 57380, "target": 57500, "type": "control"},
+{"source": 61020, "target": 59900, "type": "declaration"},
+{"source": 61410, "target": 61500, "type": "data"},
+{"source": 58300, "target": 57250, "type": "declaration"},
+{"source": 60100, "target": 60020, "type": "control"},
+{"source": 58310, "target": 57190, "type": "declaration"},
+{"source": 57320, "target": 57510, "type": "control"},
+{"source": 61320, "target": 61370, "type": "data"},
+{"source": 59230, "target": 59210, "type": "control"},
+{"source": 60800, "target": 60870, "type": "data"},
+{"source": 60100, "target": 60810, "type": "control"},
+{"source": 58260, "target": 61030, "type": "control"},
+{"source": 61190, "target": 61240, "type": "data"},
+{"source": 60980, "target": 58280, "type": "control"},
+{"source": 58300, "target": 56970, "type": "declaration"},
+{"source": 60100, "target": 60010, "type": "control"},
+{"source": 62000, "target": 59210, "type": "declaration"},
+{"source": 62000, "target": 58380, "type": "declaration"},
+{"source": 61020, "target": 60910, "type": "declaration"},
+{"source": 58080, "target": 58190, "type": "data"},
+{"source": 60980, "target": 57190, "type": "control"},
+{"source": 61700, "target": 61730, "type": "data"},
+{"source": 62000, "target": 61320, "type": "declaration"},
+{"source": 62000, "target": 58470, "type": "declaration"},
+{"source": 58300, "target": 57380, "type": "declaration"},
+{"source": 58300, "target": 57440, "type": "declaration"},
+{"source": 57380, "target": 57700, "type": "control"},
+{"source": 61020, "target": 60100, "type": "declaration"},
+{"source": 57750, "target": 61940, "type": "data"},
+{"source": 60160, "target": 60470, "type": "data"},
+{"source": 61700, "target": 61950, "type": "control"},
+{"source": 61990, "target": 61730, "type": "declaration"},
+{"source": 59170, "target": 59590, "type": "control"},
+{"source": 59170, "target": 59860, "type": "control"},
+{"source": 61700, "target": 58280, "type": "control"},
+{"source": 59850, "target": 60100, "type": "data"},
+{"source": 61030, "target": 60750, "type": "declaration"},
+{"source": 61940, "target": 61970, "type": "data"},
+{"source": 60100, "target": 60420, "type": "control"},
+{"source": 61990, "target": 61500, "type": "declaration"},
+{"source": 57380, "target": 57360, "type": "control"},
+{"source": 61030, "target": 59290, "type": "declaration"},
+{"source": 61280, "target": 58260, "type": "data"},
+{"source": 58340, "target": 58560, "type": "data"},
+{"source": 57320, "target": 58090, "type": "control"},
+{"source": 61500, "target": 61780, "type": "data"},
+{"source": 62000, "target": 61410, "type": "declaration"},
+{"source": 57500, "target": 57750, "type": "data"},
+{"source": 61990, "target": 61410, "type": "declaration"},
+{"source": 57320, "target": 57820, "type": "control"},
+{"source": 59230, "target": 59290, "type": "control"},
+{"source": 59230, "target": 59530, "type": "control"},
+{"source": 61030, "target": 59530, "type": "declaration"},
+{"source": 61030, "target": 58820, "type": "declaration"},
+{"source": 59100, "target": 59230, "type": "data"},
+{"source": 61020, "target": 60800, "type": "declaration"},
+{"source": 58310, "target": 56970, "type": "declaration"},
+{"source": 60100, "target": 60980, "type": "control"},
+{"source": 61020, "target": 59790, "type": "declaration"},
+{"source": 57380, "target": 58190, "type": "control"},
+{"source": 57380, "target": 58030, "type": "control"},
+{"source": 60980, "target": 57270, "type": "control"},
+{"source": 61700, "target": 58310, "type": "control"},
+{"source": 59230, "target": 59300, "type": "control"},
+{"source": 59100, "target": 61700, "type": "data"},
+{"source": 59170, "target": 59290, "type": "control"},
+{"source": 60980, "target": 56980, "type": "control"},
+{"source": 62000, "target": 57360, "type": "declaration"},
+{"source": 60980, "target": 58310, "type": "control"},
+{"source": 57380, "target": 57810, "type": "control"},
+{"source": 58380, "target": 58430, "type": "data"},
+{"source": 61990, "target": 61590, "type": "declaration"},
+{"source": 58310, "target": 57270, "type": "declaration"},
+{"source": 57250, "target": 57380, "type": "data"},
+{"source": 58260, "target": 61000, "type": "control"},
+{"source": 59170, "target": 59600, "type": "control"},
+{"source": 61990, "target": 58340, "type": "declaration"},
+{"source": 58260, "target": 59230, "type": "control"},
+{"source": 61700, "target": 57380, "type": "control"},
+{"source": 61020, "target": 59230, "type": "declaration"},
+{"source": 60470, "target": 61940, "type": "data"},
+{"source": 60100, "target": 60160, "type": "control"},
+{"source": 61780, "target": 61940, "type": "data"},
+{"source": 57380, "target": 57330, "type": "control"},
+{"source": 60100, "target": 60750, "type": "control"},
+{"source": 57810, "target": 61700, "type": "data"},
+{"source": 61990, "target": 61460, "type": "declaration"},
+{"source": 61820, "target": 61940, "type": "data"},
+{"source": 59170, "target": 60100, "type": "control"},
+{"source": 57320, "target": 58190, "type": "control"},
+{"source": 61060, "target": 61280, "type": "data"},
+{"source": 57380, "target": 57390, "type": "control"},
+{"source": 61460, "target": 61940, "type": "data"},
+{"source": 57810, "target": 58150, "type": "data"},
+{"source": 61020, "target": 59590, "type": "declaration"},
+{"source": 60980, "target": 57280, "type": "control"},
+{"source": 59170, "target": 59300, "type": "control"},
+{"source": 58310, "target": 57500, "type": "declaration"},
+{"source": 60080, "target": 60470, "type": "data"},
+{"source": 61700, "target": 57270, "type": "control"},
+{"source": 58260, "target": 61020, "type": "control"},
+{"source": 60100, "target": 60540, "type": "control"},
+{"source": 61700, "target": 56790, "type": "control"},
+{"source": 60220, "target": 60470, "type": "data"},
+{"source": 58470, "target": 58520, "type": "data"},
+{"source": 61990, "target": 61870, "type": "declaration"},
+{"source": 61700, "target": 57200, "type": "control"},
+{"source": 59170, "target": 58260, "type": "control"},
+{"source": 57250, "target": 61700, "type": "data"},
+{"source": 61700, "target": 57260, "type": "control"},
+{"source": 58150, "target": 61030, "type": "data"},
+{"source": 61700, "target": 56980, "type": "control"},
+{"source": 58380, "target": 58470, "type": "data"},
+{"source": 58560, "target": 60980, "type": "data"},
+{"source": 57320, "target": 58030, "type": "control"},
+{"source": 59590, "target": 59850, "type": "data"},
+{"source": 61990, "target": 58470, "type": "declaration"},
+{"source": 61100, "target": 61190, "type": "data"},
+{"source": 60100, "target": 60760, "type": "control"},
+{"source": 57320, "target": 57440, "type": "control"},
+{"source": 60100, "target": 60080, "type": "control"},
+{"source": 57320, "target": 61700, "type": "data"},
+{"source": 59230, "target": 59540, "type": "control"},
+{"source": 61990, "target": 61970, "type": "declaration"},
+{"source": 58260, "target": 59050, "type": "control"},
+{"source": 59230, "target": 60100, "type": "control"},
+{"source": 61700, "target": 61830, "type": "control"},
+{"source": 61030, "target": 60530, "type": "declaration"},
+{"source": 58310, "target": 57700, "type": "declaration"},
+{"source": 61020, "target": 58820, "type": "declaration"},
+{"source": 61700, "target": 57250, "type": "control"},
+{"source": 59230, "target": 59910, "type": "control"},
+{"source": 58300, "target": 57750, "type": "declaration"},
+{"source": 57500, "target": 61730, "type": "data"},
+{"source": 61990, "target": 61060, "type": "declaration"},
+{"source": 57380, "target": 57750, "type": "control"},
+{"source": 58270, "target": 61700, "type": "control"},
+{"source": 58260, "target": 59130, "type": "control"},
+{"source": 57380, "target": 58040, "type": "control"},
+{"source": 61590, "target": 58310, "type": "data"},
+{"source": 61020, "target": 60870, "type": "declaration"},
+{"source": 61020, "target": 60980, "type": "declaration"},
+{"source": 57320, "target": 60980, "type": "control"},
+{"source": 57380, "target": 57510, "type": "control"},
+{"source": 62000, "target": 61190, "type": "declaration"},
+{"source": 58300, "target": 58190, "type": "declaration"},
+{"source": 59170, "target": 59790, "type": "control"},
+{"source": 58470, "target": 60980, "type": "data"},
+{"source": 56970, "target": 57250, "type": "data"},
+{"source": 61990, "target": 61780, "type": "declaration"},
+{"source": 60100, "target": 60110, "type": "control"},
+{"source": 57440, "target": 57750, "type": "data"},
+{"source": 58470, "target": 58260, "type": "data"},
+{"source": 58340, "target": 58520, "type": "data"},
+{"source": 60100, "target": 60910, "type": "control"},
+{"source": 61410, "target": 61460, "type": "data"},
+{"source": 57380, "target": 58260, "type": "control"},
+{"source": 57380, "target": 57440, "type": "control"},
+{"source": 61990, "target": 61540, "type": "declaration"},
+{"source": 61100, "target": 61150, "type": "data"},
+{"source": 61990, "target": 61280, "type": "declaration"},
+{"source": 60980, "target": 57250, "type": "control"},
+{"source": 61990, "target": 61100, "type": "declaration"},
+{"source": 57320, "target": 57700, "type": "control"},
+{"source": 58310, "target": 58030, "type": "declaration"},
+{"source": 58300, "target": 57500, "type": "declaration"},
+{"source": 61540, "target": 61590, "type": "data"},
+{"source": 59230, "target": 59600, "type": "control"},
+{"source": 61700, "target": 57190, "type": "control"},
+{"source": 57380, "target": 57820, "type": "control"},
+{"source": 58260, "target": 59120, "type": "control"},
+{"source": 58270, "target": 60980, "type": "control"},
+{"source": 61020, "target": 59100, "type": "declaration"},
+{"source": 61990, "target": 61150, "type": "declaration"},
+{"source": 61700, "target": 61970, "type": "control"},
+{"source": 61020, "target": 60530, "type": "declaration"},
+{"source": 60100, "target": 60230, "type": "control"},
+{"source": 61060, "target": 61240, "type": "data"},
+{"source": 61990, "target": 61630, "type": "declaration"},
+{"source": 59170, "target": 59800, "type": "control"},
+{"source": 61020, "target": 60010, "type": "declaration"},
+{"source": 58300, "target": 58080, "type": "declaration"},
+{"source": 57320, "target": 61700, "type": "control"},
+{"source": 60800, "target": 60910, "type": "data"},
+{"source": 61370, "target": 61410, "type": "data"},
+{"source": 57380, "target": 58150, "type": "control"},
+{"source": 59230, "target": 59860, "type": "control"},
+{"source": 60980, "target": 56970, "type": "control"},
+{"source": 61700, "target": 58290, "type": "control"},
+{"source": 59170, "target": 59530, "type": "control"},
+{"source": 56970, "target": 61730, "type": "data"},
+{"source": 59170, "target": 59900, "type": "control"},
+{"source": 61990, "target": 61700, "type": "declaration"},
+{"source": 57320, "target": 58040, "type": "control"},
+{"source": 57320, "target": 57500, "type": "control"},
+{"source": 61990, "target": 58380, "type": "declaration"},
+{"source": 58820, "target": 61730, "type": "data"},
+{"source": 61990, "target": 61940, "type": "declaration"},
+{"source": 61820, "target": 61870, "type": "data"},
+{"source": 60100, "target": 60220, "type": "control"},
+{"source": 58300, "target": 58260, "type": "declaration"},
+{"source": 61020, "target": 60220, "type": "declaration"},
+{"source": 58260, "target": 59100, "type": "control"},
+{"source": 61020, "target": 60470, "type": "declaration"},
+{"source": 61030, "target": 60220, "type": "declaration"},
+{"source": 58300, "target": 58150, "type": "declaration"},
+{"source": 62000, "target": 61540, "type": "declaration"},
+{"source": 58260, "target": 58270, "type": "control"},
+{"source": 61540, "target": 61700, "type": "data"},
+{"source": 61990, "target": 61190, "type": "declaration"},
+{"source": 58310, "target": 57810, "type": "declaration"},
+{"source": 60100, "target": 60530, "type": "control"},
+{"source": 61500, "target": 57440, "type": "data"},
+{"source": 62000, "target": 60800, "type": "declaration"},
+{"source": 58260, "target": 58820, "type": "control"},
+{"source": 59230, "target": 59590, "type": "control"},
+{"source": 61020, "target": 59850, "type": "declaration"},
+{"source": 61030, "target": 60420, "type": "declaration"},
+{"source": 58260, "target": 59040, "type": "control"},
+{"source": 61020, "target": 59290, "type": "declaration"},
+{"source": 59170, "target": 58260, "type": "data"},
+{"source": 61320, "target": 61410, "type": "data"},
+{"source": 59230, "target": 59900, "type": "control"},
+{"source": 59230, "target": 59790, "type": "control"},
+{"source": 57320, "target": 60980, "type": "data"},
+{"source": 61990, "target": 61370, "type": "declaration"},
+{"source": 61700, "target": 61940, "type": "control"},
+{"source": 62000, "target": 61100, "type": "declaration"},
+{"source": 57320, "target": 58080, "type": "control"},
+{"source": 59850, "target": 60010, "type": "data"},
+{"source": 58260, "target": 61010, "type": "control"},
+{"source": 60100, "target": 60090, "type": "control"},
+{"source": 60980, "target": 56790, "type": "control"},
+{"source": 57380, "target": 57320, "type": "control"},
+{"source": 60980, "target": 60990, "type": "control"},
+{"source": 60800, "target": 58260, "type": "data"},
+{"source": 60980, "target": 58260, "type": "control"},
+{"source": 60980, "target": 58300, "type": "control"},
+{"source": 60100, "target": 60800, "type": "control"},
+{"source": 60100, "target": 60430, "type": "control"},
+{"source": 57380, "target": 57710, "type": "control"},
+{"source": 61020, "target": 60080, "type": "declaration"},
+{"source": 61990, "target": 58430, "type": "declaration"},
+{"source": 57380, "target": 58090, "type": "control"},
+{"source": 62000, "target": 61820, "type": "declaration"},
+{"source": 57380, "target": 57370, "type": "control"},
+{"source": 59170, "target": 59240, "type": "control"},
+{"source": 58260, "target": 59110, "type": "control"},
+{"source": 57320, "target": 57750, "type": "control"},
+{"source": 61500, "target": 60160, "type": "data"},
+{"source": 61700, "target": 61870, "type": "control"},
+{"source": 58080, "target": 58150, "type": "data"},
+{"source": 59230, "target": 59800, "type": "control"},
+{"source": 59290, "target": 59590, "type": "data"},
+{"source": 61700, "target": 61710, "type": "control"},
+{"source": 59230, "target": 59170, "type": "control"},
+{"source": 58300, "target": 57810, "type": "declaration"},
+{"source": 61030, "target": 59040, "type": "declaration"},
+{"source": 58260, "target": 58640, "type": "control"},
+{"source": 57320, "target": 57710, "type": "control"},
+{"source": 58820, "target": 59100, "type": "data"},
+{"source": 61990, "target": 61820, "type": "declaration"},
+{"source": 59230, "target": 59220, "type": "control"},
+{"source": 58080, "target": 60980, "type": "data"},
+{"source": 60530, "target": 60870, "type": "data"},
+{"source": 59290, "target": 59790, "type": "data"},
+{"source": 59230, "target": 59180, "type": "control"},
+{"source": 61020, "target": 60160, "type": "declaration"},
+{"source": 61030, "target": 59120, "type": "declaration"},
+{"source": 61990, "target": 58520, "type": "declaration"}
+]
+</pre>
+</text>
+</body>
+</html>

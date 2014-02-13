@@ -1,0 +1,492 @@
+<meta charset="UTF-8">
+<html>
+<head>
+    <title>notJS Slice Visualizer</title>
+    <style type="text/css">
+    body { 
+        background-color:#dc8;
+        font-size:14px;
+        margin:0;
+        padding:0; 
+    }
+
+    #code {
+        font-family: monospace;
+        background-color:#ffd; 
+        width:100%;
+        height:65%;
+        overflow:auto;
+        padding:30px;
+        float: left;
+    }
+
+    circle {
+      stroke-width: 1.5px;
+    }
+
+    line {
+      stroke: #999;
+    }
+ 
+    #controls { 
+        width:100%;
+        background-color:#333; 
+        color:#fff;
+        height:10%;
+        display: table;
+        padding: 10px;
+    }
+
+    #controls #content {
+        font-size: 20px;
+        color: white;
+
+        /* Center the controls table */
+        margin-left:auto; 
+        margin-right:auto;
+
+        border-spacing: 10px;
+    }
+
+    #controls label {
+        margin: 5px;
+    }
+
+    #bottom {
+        clear:both;
+        background-color:#dc8;
+        height:10%;
+        padding:30px;
+        overflow:auto;
+    }
+
+    div {
+        resize: both;
+    }
+
+    div.color_0 {
+        background-color: #eec;
+    }
+
+    .notInSlice {
+        /*opacity: 0.3*/
+        color: #aaa
+    }
+
+    .seed {
+        font-weight: bold
+    }
+
+    #controls {
+        font-size: 20px;
+    }
+
+    .bigbutton {
+        font-size: 20px;
+    }
+    </style>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.4.3/jquery.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.9.2/jquery-ui.min.js"></script>
+    <script src="http://d3js.org/d3.v3.min.js"></script>
+    <link rel="stylesheet" href="css/jquery.colorpicker.css" />
+    <link rel="stylesheet" href="css/jquery.classygradient.css" />
+    <script src="js/jquery.colorpicker.js"></script>
+    <script src="js/jquery.classygradient.js"></script>
+    <script type="text/javascript">
+        var lastLinesHTML = null
+        var lineIDs = []
+
+        var edges = []
+        var forwardNeighbors = {}
+        var backwardNeighbors = {}
+
+        var edgeColors = {'data': '#FF0000', 'control': '#EEEE00', 'declaration': '#00FFFF', 'other': '#00CC00'}
+
+        function refresh() {
+            initEdges()
+            initLines()
+            clearSlice()
+        }
+
+        function initEdges() {
+            // Edge types can be enabled/disabled by the user
+            var enabledEdges = {}
+            for (var type in edgeColors) {
+                enabledEdges[type] = $('#' + type + '_edges_enabled').attr('checked')
+            }
+
+            // Populate an adjacency list with the enabled edges
+            forwardNeighbors  = {}
+            backwardNeighbors = {}
+            edges = JSON.parse($('#bottom').text())
+            for (var i=0; i<edges.length; i++) {
+                var source = edges[i].source
+                var target = edges[i].target
+                var type = edges[i].type
+
+                if (edgeColors[type] === undefined)
+                    type = 'other'
+                if (!enabledEdges[type])
+                    continue
+
+                if (forwardNeighbors[source] === undefined)
+                    forwardNeighbors[source] = {}
+                if (forwardNeighbors[source][target] === undefined)
+                    forwardNeighbors[source][target] = []
+                forwardNeighbors[source][target].push(type)
+
+                if (backwardNeighbors[target] === undefined)
+                    backwardNeighbors[target] = {}
+                if (backwardNeighbors[target][source] === undefined)
+                    backwardNeighbors[target][source] = []
+                backwardNeighbors[target][source].push(type)
+
+            }
+        }
+
+        function initLines() {
+            var lines = $('#code').html()
+
+            if (lines.indexOf('<button') > -1)
+                return
+
+            if (lines === lastLinesHTML)
+                return
+
+            lineIDs = []
+
+            lines = lines.replace(/<div[^>]*>/g, '')
+            lines = lines.replace(/ /g, '&nbsp;')
+            lines = lines.replace(/<\/div>/g, '\n')
+            lines = lines.replace(/<br>/g, '\n')
+            lines = lines.split('\n')
+
+            var text = []
+            var nMatches = 0
+            for (var i=0; i<lines.length; i++) {
+                var match = /ID:&nbsp;([0-9]+)/.exec(lines[i])
+                
+                if (match) {
+                    nMatches++
+                    var codeLine = lines[i].replace(/ID:&nbsp;([0-9]+)/, '')
+                    var idButton = "<button onclick='javascript:doSlice(\"" + match[1] + "\")'>Slice from " + match[1] + "</button>"
+                    var divClass = "color_" + (nMatches % 2)
+                    text += "<div class='line_" + match[1] + " " + divClass + "'>" + codeLine + idButton  + "</div>"
+                    lineIDs.push(match[1])
+                } else {
+                    text += "<div>" + lines[i] + "</div>"
+                }
+            }
+            $('#code').html(text)
+            lastLinesHTML = text
+        }
+
+        function doSlice(seed) {
+            clearSlice()
+            initEdges()
+
+            var isForward = $('#forward').attr('checked')
+            var neighbors = isForward ? forwardNeighbors : backwardNeighbors
+
+            $('.line_' + seed).addClass('seed')
+
+            // Highlight neighbors
+            for (var neighbor in neighbors[seed]) {
+                var edgeTypes = neighbors[seed][neighbor]
+                edgeTypes.sort()
+
+                var gradientSpec = ''
+                for (var i=0; i<edgeTypes.length; i++) {
+                    var color = edgeColors[edgeTypes[i]]
+                    gradientSpec += (100*i)/edgeTypes.length + '%' + color
+                    gradientSpec += ','
+                    gradientSpec += (100*(i+1))/edgeTypes.length + '%' + color
+                    if (i < edgeTypes.length - 1) {
+                        gradientSpec += ','
+                    }
+                }
+
+                var hiddenDiv = $('<div id="hidden" style="display: none">').appendTo('body')
+                hiddenDiv.ClassyGradient({
+                    target: ".line_" + neighbor,
+                    orientation: "horizontal",
+                    gradient: gradientSpec}); 
+            }
+
+            // Hide lines that aren't in the slice
+            for (var i=0; i<lineIDs.length; i++) {
+                $('.line_' + lineIDs[i]).addClass('notInSlice')
+            }
+
+            var visited = {seed: true}
+            var stack = [seed]
+            while (stack.length > 0) {
+                var current = stack.pop()
+                $('.line_' + current).removeClass('notInSlice')
+                for (var next in neighbors[current]) {
+                    if (visited[next] === undefined) {
+                        stack.push(next)
+                        visited[next] = true
+                    }
+                }
+            }
+        }
+
+        function clearSlice() {
+            for (var i=0; i<lineIDs.length; i++) {
+                $('.line_' + lineIDs[i]).attr('style', '')
+                $('.line_' + lineIDs[i]).removeClass('notInSlice')
+                $('.line_' + lineIDs[i]).removeClass('seed')
+            }
+        }
+
+        $(document).ready(function () {
+            $('#code').html($('#codePlaceholder').html())
+            $('#bottom').html($('#bottomPlaceholder').html())
+            refresh()
+        })
+
+        function instructions() {
+            alert("1) Use the checkboxes to enable/disable certain types of dependence edge.\n"
+             + "2) Choose a slice direction and click a 'Slice from ...' button to slice. \n"
+             + "Directly dependent statements will be highlighted, and statements not in the slice will be greyed out.")
+        }
+    </script>
+</head>
+
+<body>
+<div>
+    <div id="code" contenteditable="true" spellcheck="false">code</div>
+</div>
+<br/>
+<div id="controls">
+    <table id="content" class="center">
+        <tr>
+        <td>Slice direction:</td>
+        <td>
+        <label><input type="radio" name="direction" id="forward" value="Forward" /> Forward</label>
+        <label><input type="radio" name="direction" id="backward" value="Backward" checked /> Backward</label>
+        </td>
+        </tr>
+
+        <tr>
+        <td>Enabled edges:</td>
+        <td>
+        <label><input type="checkbox" id="data_edges_enabled" checked /> data</label>
+        <label><input type="checkbox" id="control_edges_enabled" checked /> control</label>
+        <label><input type="checkbox" id="declaration_edges_enabled" checked /> declaration</label>
+        <label><input type="checkbox" id="other_edges_enabled" checked /> other</label>
+        </td>
+        </tr>
+
+        <tr>
+        <td><button onclick="javascript:instructions()" class="bigbutton">Help</button></td>
+        </tr>
+    </table>
+</div>
+<div id="bottom" contenteditable="true" spellcheck="false">
+Paste dependence graph here
+</div>
+
+<!-- ************************************************ -->
+<!-- Dummy elements to hold the long placeholder text -->
+<!-- ************************************************ -->
+<text style="display: none" id="codePlaceholder">
+decl `dummy`2 = undef, `arrayVar`3 = `window`0 ⌜⋆⌝ "Array", `functionVar`4 = `window`0 ⌜⋆⌝ "Function", `stringVar`5 = `window`0 ⌜⋆⌝ "String", `regexpVar`6 = `window`0 ⌜⋆⌝ "RegExp", `booleanVar`7 = `window`0 ⌜⋆⌝ "Boolean", `numberVar`8 = `window`0 ⌜⋆⌝ "Number", `dateVar`9 = `window`0 ⌜⋆⌝ "Date", `errorVar`10 = `window`0 ⌜⋆⌝ "Error", `argumentsVar`11 = `window`0 ⌜⋆⌝ "Arguments", `objectVar`12 = `window`0 ⌜⋆⌝ "Object", `dummyAddressVar`13 = `window`0 ⌜⋆⌝ "dummyAddress", window = `window`0 inID: 41410 
+  scratch (11) in                                                                                   ID: 41400 
+      (`window`0).("dummyAddress") = undef                                                          ID: 37400 
+      (`window`0).("Arguments") = undef                                                             ID: 37440 
+      (`window`0).("x") = 1.0                                                                       ID: 37480 
+      (`window`0).("y") = 2.0                                                                       ID: 37520 
+      if isprim `window`0 ⌜⋆⌝ "x"                                                                   ID: 37890 
+          scratch_0 = `window`0 ⌜⋆⌝ "x"                                                             ID: 37610 
+      else                                                                                          ID: 37890 
+          scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 37660 
+          merge                                                                                     ID: 37670 
+          (scratch_1).("0") = true                                                                  ID: 37710 
+          (scratch_1).("length") = 1.0                                                              ID: 37750 
+          scratch_0 = `window`0 ⌜⋆⌝ "x" ⌜⋆⌝ "valueOf"(`window`0 ⌜⋆⌝ "x", scratch_1)                 ID: 37860 
+          merge                                                                                     ID: 37870 
+      merge                                                                                         ID: 37900 
+      if isprim `window`0 ⌜⋆⌝ "y"                                                                   ID: 38270 
+          scratch_2 = `window`0 ⌜⋆⌝ "y"                                                             ID: 37990 
+      else                                                                                          ID: 38270 
+          scratch_3 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 38040 
+          merge                                                                                     ID: 38050 
+          (scratch_3).("0") = true                                                                  ID: 38090 
+          (scratch_3).("length") = 1.0                                                              ID: 38130 
+          scratch_2 = `window`0 ⌜⋆⌝ "y" ⌜⋆⌝ "valueOf"(`window`0 ⌜⋆⌝ "y", scratch_3)                 ID: 38240 
+          merge                                                                                     ID: 38250 
+      merge                                                                                         ID: 38280 
+      if isprim scratch_0                                                                           ID: 38530 
+          scratch_4 = scratch_0                                                                     ID: 38330 
+      else                                                                                          ID: 38530 
+          scratch_5 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 38380 
+          merge                                                                                     ID: 38390 
+          (scratch_5).("length") = 0.0                                                              ID: 38430 
+          scratch_4 = scratch_0 ⌜⋆⌝ "toString"(scratch_0, scratch_5)                                ID: 38500 
+          merge                                                                                     ID: 38510 
+      merge                                                                                         ID: 38540 
+      if isprim scratch_2                                                                           ID: 38790 
+          scratch_6 = scratch_2                                                                     ID: 38590 
+      else                                                                                          ID: 38790 
+          scratch_7 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 38640 
+          merge                                                                                     ID: 38650 
+          (scratch_7).("length") = 0.0                                                              ID: 38690 
+          scratch_6 = scratch_2 ⌜⋆⌝ "toString"(scratch_2, scratch_7)                                ID: 38760 
+          merge                                                                                     ID: 38770 
+      merge                                                                                         ID: 38800 
+      if isprim scratch_4                                                                           ID: 38900 
+          scratch_8 = scratch_4                                                                     ID: 38850 
+      else                                                                                          ID: 38900 
+          throw "TypeError"                                                                         ID: 38880 
+      merge                                                                                         ID: 38910 
+      if isprim scratch_6                                                                           ID: 39010 
+          scratch_9 = scratch_6                                                                     ID: 38960 
+      else                                                                                          ID: 39010 
+          throw "TypeError"                                                                         ID: 38990 
+      merge                                                                                         ID: 39020 
+      if typeof scratch_8 ⌜≡⌝ "string"                                                              ID: 39360 
+          scratch_10 = scratch_8 ⌜++⌝ tostr scratch_9                                               ID: 39120 
+      else                                                                                          ID: 39360 
+          if typeof scratch_9 ⌜≡⌝ "string"                                                          ID: 39330 
+              scratch_10 = tostr scratch_8 ⌜++⌝ scratch_9                                           ID: 39230 
+          else                                                                                      ID: 39330 
+              scratch_10 = tonum scratch_8 ⌜+⌝ tonum scratch_9                                      ID: 39310 
+          merge                                                                                     ID: 39340 
+      merge                                                                                         ID: 39370 
+      (`window`0).("z") = scratch_10                                                                ID: 39410 
+      if isprim `window`0 ⌜⋆⌝ "z"                                                                   ID: 39780 
+          scratch_0 = `window`0 ⌜⋆⌝ "z"                                                             ID: 39500 
+      else                                                                                          ID: 39780 
+          scratch_1 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 39550 
+          merge                                                                                     ID: 39560 
+          (scratch_1).("0") = true                                                                  ID: 39600 
+          (scratch_1).("length") = 1.0                                                              ID: 39640 
+          scratch_0 = `window`0 ⌜⋆⌝ "z" ⌜⋆⌝ "valueOf"(`window`0 ⌜⋆⌝ "z", scratch_1)                 ID: 39750 
+          merge                                                                                     ID: 39760 
+      merge                                                                                         ID: 39790 
+      if isprim `window`0 ⌜⋆⌝ "x"                                                                   ID: 40160 
+          scratch_2 = `window`0 ⌜⋆⌝ "x"                                                             ID: 39880 
+      else                                                                                          ID: 40160 
+          scratch_3 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 39930 
+          merge                                                                                     ID: 39940 
+          (scratch_3).("0") = true                                                                  ID: 39980 
+          (scratch_3).("length") = 1.0                                                              ID: 40020 
+          scratch_2 = `window`0 ⌜⋆⌝ "x" ⌜⋆⌝ "valueOf"(`window`0 ⌜⋆⌝ "x", scratch_3)                 ID: 40130 
+          merge                                                                                     ID: 40140 
+      merge                                                                                         ID: 40170 
+      if isprim scratch_0                                                                           ID: 40420 
+          scratch_4 = scratch_0                                                                     ID: 40220 
+      else                                                                                          ID: 40420 
+          scratch_5 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 40270 
+          merge                                                                                     ID: 40280 
+          (scratch_5).("length") = 0.0                                                              ID: 40320 
+          scratch_4 = scratch_0 ⌜⋆⌝ "toString"(scratch_0, scratch_5)                                ID: 40390 
+          merge                                                                                     ID: 40400 
+      merge                                                                                         ID: 40430 
+      if isprim scratch_2                                                                           ID: 40680 
+          scratch_6 = scratch_2                                                                     ID: 40480 
+      else                                                                                          ID: 40680 
+          scratch_7 = new `argumentsVar`11(`dummyAddressVar`13)                                     ID: 40530 
+          merge                                                                                     ID: 40540 
+          (scratch_7).("length") = 0.0                                                              ID: 40580 
+          scratch_6 = scratch_2 ⌜⋆⌝ "toString"(scratch_2, scratch_7)                                ID: 40650 
+          merge                                                                                     ID: 40660 
+      merge                                                                                         ID: 40690 
+      if isprim scratch_4                                                                           ID: 40790 
+          scratch_8 = scratch_4                                                                     ID: 40740 
+      else                                                                                          ID: 40790 
+          throw "TypeError"                                                                         ID: 40770 
+      merge                                                                                         ID: 40800 
+      if isprim scratch_6                                                                           ID: 40900 
+          scratch_9 = scratch_6                                                                     ID: 40850 
+      else                                                                                          ID: 40900 
+          throw "TypeError"                                                                         ID: 40880 
+      merge                                                                                         ID: 40910 
+      if typeof scratch_8 ⌜≡⌝ "string"                                                              ID: 41250 
+          scratch_10 = scratch_8 ⌜++⌝ tostr scratch_9                                               ID: 41010 
+      else                                                                                          ID: 41250 
+          if typeof scratch_9 ⌜≡⌝ "string"                                                          ID: 41220 
+              scratch_10 = tostr scratch_8 ⌜++⌝ scratch_9                                           ID: 41120 
+          else                                                                                      ID: 41220 
+              scratch_10 = tonum scratch_8 ⌜+⌝ tonum scratch_9                                      ID: 41200 
+          merge                                                                                     ID: 41230 
+      merge                                                                                         ID: 41260 
+      (`window`0).("w") = scratch_10                                                                ID: 41300 
+      print `window`0 ⌜⋆⌝ "z"                                                                       ID: 41340 
+      print `window`0 ⌜⋆⌝ "w"                                                                       ID: 41380 
+
+</text>
+<text style="display: none" id="bottomPlaceholder">
+<pre>[
+{"source": 41400, "target": 38590, "type": "declaration"},
+{"source": 41400, "target": 40850, "type": "declaration"},
+{"source": 40480, "target": 40900, "type": "data"},
+{"source": 41400, "target": 38330, "type": "declaration"},
+{"source": 41400, "target": 41250, "type": "declaration"},
+{"source": 40740, "target": 41200, "type": "data"},
+{"source": 40220, "target": 40740, "type": "data"},
+{"source": 37520, "target": 37990, "type": "data"},
+{"source": 37480, "target": 39880, "type": "data"},
+{"source": 41400, "target": 40420, "type": "declaration"},
+{"source": 41400, "target": 39360, "type": "declaration"},
+{"source": 37480, "target": 37610, "type": "data"},
+{"source": 40740, "target": 41250, "type": "data"},
+{"source": 41400, "target": 38960, "type": "declaration"},
+{"source": 37610, "target": 38330, "type": "data"},
+{"source": 39500, "target": 40420, "type": "data"},
+{"source": 38850, "target": 39310, "type": "data"},
+{"source": 41400, "target": 39880, "type": "declaration"},
+{"source": 41400, "target": 40790, "type": "declaration"},
+{"source": 39410, "target": 39780, "type": "data"},
+{"source": 39410, "target": 39500, "type": "data"},
+{"source": 38330, "target": 38900, "type": "data"},
+{"source": 41400, "target": 39330, "type": "declaration"},
+{"source": 38960, "target": 39330, "type": "data"},
+{"source": 41400, "target": 39410, "type": "declaration"},
+{"source": 41400, "target": 40220, "type": "declaration"},
+{"source": 38590, "target": 38960, "type": "data"},
+{"source": 40850, "target": 41220, "type": "data"},
+{"source": 39410, "target": 41340, "type": "data"},
+{"source": 39310, "target": 39410, "type": "data"},
+{"source": 41400, "target": 39010, "type": "declaration"},
+{"source": 41400, "target": 38900, "type": "declaration"},
+{"source": 38590, "target": 39010, "type": "data"},
+{"source": 37990, "target": 38790, "type": "data"},
+{"source": 40850, "target": 41200, "type": "data"},
+{"source": 41400, "target": 37610, "type": "declaration"},
+{"source": 38960, "target": 39310, "type": "data"},
+{"source": 38850, "target": 39360, "type": "data"},
+{"source": 41400, "target": 41220, "type": "declaration"},
+{"source": 41400, "target": 40740, "type": "declaration"},
+{"source": 41400, "target": 39310, "type": "declaration"},
+{"source": 41400, "target": 39500, "type": "declaration"},
+{"source": 39880, "target": 40480, "type": "data"},
+{"source": 41400, "target": 41200, "type": "declaration"},
+{"source": 37480, "target": 37890, "type": "data"},
+{"source": 41400, "target": 38530, "type": "declaration"},
+{"source": 37520, "target": 38270, "type": "data"},
+{"source": 37610, "target": 38530, "type": "data"},
+{"source": 41300, "target": 41380, "type": "data"},
+{"source": 41400, "target": 40480, "type": "declaration"},
+{"source": 37990, "target": 38590, "type": "data"},
+{"source": 39880, "target": 40680, "type": "data"},
+{"source": 41400, "target": 40900, "type": "declaration"},
+{"source": 40480, "target": 40850, "type": "data"},
+{"source": 40220, "target": 40790, "type": "data"},
+{"source": 41400, "target": 37990, "type": "declaration"},
+{"source": 38330, "target": 38850, "type": "data"},
+{"source": 37480, "target": 40160, "type": "data"},
+{"source": 41400, "target": 40680, "type": "declaration"},
+{"source": 41400, "target": 38850, "type": "declaration"},
+{"source": 41400, "target": 38790, "type": "declaration"},
+{"source": 39500, "target": 40220, "type": "data"},
+{"source": 41400, "target": 41300, "type": "declaration"},
+{"source": 41200, "target": 41300, "type": "data"}
+]
+</pre>
+</text>
+</body>
+</html>
